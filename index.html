@@ -1,0 +1,932 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ledger · Savings & Weight Tracker</title>
+<style>
+  :root{
+    --bg:#0F1216; --surface:#161A20; --surface2:#1D222B; --line:#2A313C;
+    --text:#E7E9ED; --muted:#8B95A2; --faint:#5E6773;
+    --gold:#C9A24B; --gold-soft:#E0C281; --teal:#54B6B0;
+    --pos:#5BB57F; --neg:#D86A52;
+    --serif:Georgia,'Iowan Old Style','Times New Roman',serif;
+    --sans:system-ui,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+    --mono:ui-monospace,'SF Mono','Cascadia Code',Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:15px;line-height:1.5;-webkit-font-smoothing:antialiased}
+  .tnum{font-variant-numeric:tabular-nums;font-family:var(--mono)}
+  a{color:inherit}
+  ::selection{background:var(--gold);color:#0F1216}
+
+  /* layout */
+  .app{display:flex;min-height:100vh}
+  .side{width:232px;flex:0 0 232px;border-right:1px solid var(--line);padding:26px 18px;position:sticky;top:0;height:100vh;display:flex;flex-direction:column;gap:6px;background:linear-gradient(180deg,#13171D,#0F1216)}
+  .brand{font-family:var(--serif);font-size:21px;letter-spacing:.5px;margin-bottom:2px}
+  .brand b{color:var(--gold)}
+  .brand-sub{font-size:11px;letter-spacing:2.5px;text-transform:uppercase;color:var(--faint);margin-bottom:24px}
+  .nav{display:flex;flex-direction:column;gap:2px}
+  .nav button{all:unset;cursor:pointer;display:flex;align-items:center;gap:11px;padding:10px 12px;border-radius:9px;color:var(--muted);font-size:14px;transition:.15s}
+  .nav button .ic{width:7px;height:7px;border-radius:50%;background:var(--faint);flex:0 0 auto;transition:.15s}
+  .nav button:hover{color:var(--text);background:var(--surface)}
+  .nav button.on{color:var(--text);background:var(--surface2)}
+  .nav button.on .ic{background:var(--gold)}
+  .side-foot{margin-top:auto;font-size:11px;color:var(--faint);line-height:1.6}
+  .side-foot button{all:unset;cursor:pointer;color:var(--muted);text-decoration:underline;text-underline-offset:2px}
+  .side-foot button:hover{color:var(--gold)}
+
+  main{flex:1;min-width:0;padding:38px 46px 80px;max-width:1080px}
+  .eyebrow{font-size:11px;letter-spacing:3px;text-transform:uppercase;color:var(--gold);margin-bottom:8px}
+  h1.page{font-family:var(--serif);font-size:30px;font-weight:600;letter-spacing:.3px;margin-bottom:4px}
+  .page-sub{color:var(--muted);font-size:14px;margin-bottom:30px}
+
+  .grid{display:grid;gap:18px}
+  .cols-2{grid-template-columns:1fr 1fr}
+  .cols-3{grid-template-columns:repeat(3,1fr)}
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px}
+  .card.glow{background:linear-gradient(150deg,#1A1F27,#14181E)}
+  .card h3{font-size:11px;letter-spacing:2px;text-transform:uppercase;color:var(--muted);font-weight:600;margin-bottom:16px}
+
+  /* hero / horizon */
+  .horizon{display:flex;gap:34px;align-items:center;flex-wrap:wrap}
+  .ring{flex:0 0 auto}
+  .horizon-body{flex:1;min-width:240px}
+  .big{font-family:var(--mono);font-size:40px;font-weight:600;letter-spacing:-1px;line-height:1}
+  .big .cur{color:var(--gold)}
+  .big-sub{color:var(--muted);font-size:14px;margin-top:8px}
+  .eta{font-family:var(--serif);font-size:20px;margin-top:18px}
+  .eta b{color:var(--gold-soft)}
+  .runway{height:7px;background:var(--surface2);border-radius:99px;overflow:hidden;margin-top:14px;border:1px solid var(--line)}
+  .runway>div{height:100%;background:linear-gradient(90deg,var(--gold),var(--gold-soft));border-radius:99px}
+
+  .stat{display:flex;flex-direction:column;gap:3px}
+  .stat .k{font-size:12px;color:var(--muted)}
+  .stat .v{font-family:var(--mono);font-size:24px;font-weight:600}
+  .stat .v.sm{font-size:19px}
+  .pos{color:var(--pos)} .neg{color:var(--neg)} .gold{color:var(--gold)} .teal{color:var(--teal)}
+
+  .proj-row{display:flex;justify-content:space-between;align-items:baseline;padding:13px 0;border-bottom:1px solid var(--line)}
+  .proj-row:last-child{border-bottom:none}
+  .proj-row .when{color:var(--muted);font-size:13px}
+  .proj-row .amt{font-family:var(--mono);font-size:17px}
+  .proj-row .pct{font-family:var(--mono);font-size:12px;color:var(--gold);margin-left:10px}
+
+  table{width:100%;border-collapse:collapse}
+  th{text-align:left;font-size:11px;letter-spacing:1px;text-transform:uppercase;color:var(--muted);font-weight:600;padding:0 10px 12px;border-bottom:1px solid var(--line)}
+  th.r,td.r{text-align:right}
+  td{padding:13px 10px;border-bottom:1px solid var(--line);font-size:14px}
+  tr:last-child td{border-bottom:none}
+  .wk-label{font-family:var(--serif);font-size:16px}
+  .wk-month{font-size:11px;color:var(--faint);letter-spacing:1px;text-transform:uppercase}
+
+  input,select{font-family:var(--sans);font-size:14px;color:var(--text);background:var(--surface2);border:1px solid var(--line);border-radius:8px;padding:9px 11px;width:100%;transition:.15s}
+  input:focus,select:focus{outline:none;border-color:var(--gold);background:#222834}
+  input.tnum{font-family:var(--mono)}
+  label.fld{display:block;margin-bottom:14px}
+  label.fld .lbl{display:block;font-size:12px;color:var(--muted);margin-bottom:6px}
+  .row2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px}
+
+  button.btn{all:unset;cursor:pointer;display:inline-flex;align-items:center;gap:7px;padding:9px 16px;border-radius:9px;font-size:13px;font-weight:600;letter-spacing:.3px;transition:.15s}
+  .btn.gold{background:var(--gold);color:#11140C}
+  .btn.gold:hover{background:var(--gold-soft)}
+  .btn.ghost{border:1px solid var(--line);color:var(--muted)}
+  .btn.ghost:hover{border-color:var(--gold);color:var(--text)}
+  .btn.tiny{padding:5px 10px;font-size:12px}
+  .btn.danger{color:var(--neg)} .btn.danger:hover{border-color:var(--neg)}
+  .toolbar{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:22px;align-items:center}
+  .spacer{flex:1}
+
+  .chip{display:inline-flex;align-items:center;gap:6px;background:var(--surface2);border:1px solid var(--line);border-radius:99px;padding:5px 11px;font-size:12px;cursor:pointer;transition:.15s}
+  .chip:hover{border-color:var(--gold)}
+  .chip.on{border-color:var(--gold);color:var(--gold)}
+  .legend{display:flex;gap:16px;font-size:12px;color:var(--muted);margin-bottom:8px;flex-wrap:wrap}
+  .legend .dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:5px;vertical-align:-1px}
+  .chart-wrap{width:100%;overflow:hidden}
+  .chart-wrap svg{width:100%;height:auto;display:block}
+  textarea.paste{font-family:var(--mono);font-size:12px;color:var(--text);background:var(--surface2);border:1px solid var(--line);border-radius:8px;padding:10px;width:100%;min-height:110px;resize:vertical}
+  textarea.paste:focus{outline:none;border-color:var(--gold)}
+  .chips{display:flex;gap:8px;flex-wrap:wrap;margin:6px 0 14px}
+
+  .item-line{display:grid;grid-template-columns:1fr 120px 84px 30px;gap:8px;align-items:center;margin-bottom:8px}
+  .item-line.budget-line{grid-template-columns:1fr 120px 30px}
+  .seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+  .seg button{all:unset;cursor:pointer;padding:8px 0;flex:1;text-align:center;font-size:12px;color:var(--muted);width:42px}
+  .seg button.on{background:var(--surface2);color:var(--text)}
+  .seg button.on.in{color:var(--pos)} .seg button.on.out{color:var(--neg)}
+  .x{all:unset;cursor:pointer;color:var(--faint);text-align:center;font-size:16px}
+  .x:hover{color:var(--neg)}
+
+  .variance{font-family:var(--mono);font-weight:600}
+  .badge{display:inline-block;font-family:var(--mono);font-size:12px;padding:3px 9px;border-radius:99px}
+  .badge.pos{background:rgba(91,181,127,.13);color:var(--pos)}
+  .badge.neg{background:rgba(216,106,82,.13);color:var(--neg)}
+
+  /* daily budget */
+  .pool{display:flex;align-items:baseline;gap:10px}
+  .pool .left{font-family:var(--mono);font-size:46px;font-weight:600}
+  .day-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:8px;margin:18px 0}
+  .day{background:var(--surface2);border:1px solid var(--line);border-radius:10px;padding:10px;text-align:center}
+  .day .dn{font-size:10px;color:var(--faint);text-transform:uppercase;letter-spacing:1px}
+  .day .dv{font-family:var(--mono);font-size:15px;margin-top:4px}
+  .day.over{border-color:var(--neg)} .day.over .dv{color:var(--neg)}
+  .day.under{border-color:rgba(91,181,127,.4)}
+  .day.empty .dv{color:var(--faint)}
+
+  .empty-state{text-align:center;color:var(--muted);padding:50px 20px;border:1px dashed var(--line);border-radius:14px}
+  .empty-state b{color:var(--text);font-family:var(--serif);font-size:18px;display:block;margin-bottom:6px}
+
+  .muted{color:var(--muted)} .small{font-size:12px}
+  hr.div{border:none;border-top:1px solid var(--line);margin:22px 0}
+
+  @media(max-width:820px){
+    .app{flex-direction:column}
+    .side{width:100%;height:auto;position:static;flex-direction:row;flex-wrap:wrap;align-items:center;padding:14px 16px}
+    .brand,.brand-sub{display:none}
+    .nav{flex-direction:row;flex-wrap:wrap}
+    .side-foot{margin:0 0 0 auto}
+    main{padding:24px 18px 60px}
+    .cols-2,.cols-3{grid-template-columns:1fr}
+    .item-line{grid-template-columns:1fr 90px 70px 26px}
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="side">
+    <div class="brand"><b>Ledger</b></div>
+    <div class="brand-sub">Savings &amp; Weight</div>
+    <nav class="nav" id="nav"></nav>
+    <div class="side-foot">
+      <div id="saveState">Saved locally</div>
+      <button data-act="export">Backup</button> ·
+      <button data-act="import">Restore</button>
+      <input type="file" id="importFile" accept="application/json" hidden>
+    </div>
+  </aside>
+  <main id="main"></main>
+</div>
+
+<script>
+"use strict";
+/* ---------- storage ---------- */
+const KEY="ledger_v1";
+const uid=()=>Math.random().toString(36).slice(2,9);
+
+const SEED={
+  config:{
+    goal:300000, currency:"DH", weeklyBudget:500, weeksPerMonth:4,
+    weight:{ goal:80, weeklyRate:0.7 },
+    plan:{
+      incomes:[{id:uid(),name:"Salary",amount:11500}],
+      fixed:[{id:uid(),name:"Loan",amount:1865},{id:uid(),name:"Bills",amount:1000},{id:uid(),name:"Misc",amount:230}]
+    }
+  },
+  weeks:[
+    { id:uid(), label:"CW 15", month:"2026-02", date:"2026-02-08",
+      objMoney:72002, actStart:63306, budget:500,
+      objWeight:85, actWeight:85.25,
+      items:[
+        {id:uid(),name:"Bader's Rent",amount:1950,kind:"in"},
+        {id:uid(),name:"Imprimante",amount:400,kind:"in"},
+        {id:uid(),name:"Tiguan Tax",amount:1500,kind:"in"},
+        {id:uid(),name:"Rida",amount:500,kind:"in"},
+        {id:uid(),name:"New House",amount:2800,kind:"in"},
+        {id:uid(),name:"Other",amount:1041,kind:"in"}
+      ],
+      spend:[{id:uid(),date:"2026-02-08",amount:60,note:"Lunch"},{id:uid(),date:"2026-02-09",amount:120,note:"Groceries"}]
+    }
+  ],
+  ui:{tab:"dashboard",budgetWeek:null}
+};
+
+function load(){
+  try{const r=localStorage.getItem(KEY);if(r)return JSON.parse(r);}catch(e){}
+  return JSON.parse(JSON.stringify(SEED));
+}
+let S=load();
+S.ui=Object.assign({tab:"dashboard",budgetWeek:null,range:"6m",gran:"week"},S.ui||{});
+let saveTimer=null;
+function save(){
+  try{
+    localStorage.setItem(KEY,JSON.stringify(S));
+    const el=document.getElementById("saveState");
+    if(el){el.textContent="Saved ✓";clearTimeout(saveTimer);saveTimer=setTimeout(()=>el.textContent="Saved locally",1200);}
+  }catch(e){
+    const el=document.getElementById("saveState");if(el)el.textContent="⚠ Storage blocked";
+  }
+}
+
+/* ---------- helpers ---------- */
+const cur=()=>S.config.currency||"DH";
+function money(n){
+  if(n===""||n==null||isNaN(n))return "—";
+  const v=Math.round(Number(n)*100)/100;
+  return new Intl.NumberFormat("en-US",{maximumFractionDigits:0}).format(v)+" "+cur();
+}
+function money1(n){
+  if(n===""||n==null||isNaN(n))return "—";
+  return new Intl.NumberFormat("en-US",{maximumFractionDigits:1}).format(Number(n))+" "+cur();
+}
+function kg(n){ if(n===""||n==null||isNaN(n))return "—"; return Number(n).toFixed(1)+" kg"; }
+function num(v){ const n=parseFloat(v); return isNaN(n)?0:n; }
+function sortedWeeks(){ return [...S.weeks].sort((a,b)=>(a.date||"").localeCompare(b.date||"")||(a.label).localeCompare(b.label)); }
+function lastWeek(){ const w=sortedWeeks(); return w[w.length-1]||null; }
+
+function weekActual(w){ const it=(w.items||[]).reduce((s,i)=>s+(i.kind==="out"?-num(i.amount):num(i.amount)),0); return num(w.actStart)+it; }
+function weekVar(w){ if(w.actWeight==="" && (w.items||[]).length===0 && w.actStart==="") return null; return weekActual(w)-num(w.objMoney); }
+function weekSpent(w){ return (w.spend||[]).reduce((s,e)=>s+num(e.amount),0); }
+
+function currentSavings(){ const w=lastWeek(); return w?weekActual(w):num(S.config.plan?0:0); }
+function progress(){ return Math.min(1, currentSavings()/ (S.config.goal||1)); }
+
+function monthlyNet(){
+  const p=S.config.plan||{incomes:[],fixed:[]};
+  const inc=(p.incomes||[]).reduce((s,i)=>s+num(i.amount),0);
+  const fix=(p.fixed||[]).reduce((s,i)=>s+num(i.amount),0);
+  return inc - fix - num(S.config.weeklyBudget)*num(S.config.weeksPerMonth);
+}
+function monthName(key){ if(!key)return""; const [y,m]=key.split("-"); const d=new Date(Number(y),Number(m)-1,1); return d.toLocaleDateString("en-US",{month:"long",year:"numeric"}); }
+function addMonths(date,n){ const d=new Date(date); d.setMonth(d.getMonth()+n); return d; }
+
+/* ---------- history & charts ---------- */
+function weekDateKey(w){ return w.date || (w.month? w.month+"-15" : ""); }
+function hasMoneyActual(w){ return !(w.actStart===""||w.actStart==null) || (w.items||[]).length>0; }
+function rangeCutoff(){
+  const r=S.ui.range||"6m";
+  if(r==="all") return null;
+  const m={"3m":3,"6m":6,"9m":9,"1y":12}[r]||6;
+  const d=new Date(); d.setMonth(d.getMonth()-m);
+  return d.toISOString().slice(0,10);
+}
+function historyRows(){
+  const cut=rangeCutoff();
+  const ws=sortedWeeks().filter(w=>{
+    const k=weekDateKey(w);
+    if(!k) return cut===null;
+    return cut===null || k>=cut;
+  });
+  if((S.ui.gran||"week")==="week"){
+    return ws.map(w=>({
+      key:w.label+(w.month?" · "+monthName(w.month).split(" ")[0].slice(0,3)+" "+w.month.slice(2,4):""),
+      tick:(w.label||"").replace("CW ","W"),
+      objM:(w.objMoney===""||w.objMoney==null)?null:num(w.objMoney),
+      actM:hasMoneyActual(w)?weekActual(w):null,
+      objW:(w.objWeight===""||w.objWeight==null)?null:num(w.objWeight),
+      actW:(w.actWeight===""||w.actWeight==null)?null:num(w.actWeight)
+    }));
+  }
+  const map=new Map();
+  ws.forEach(w=>{
+    const mk=w.month||weekDateKey(w).slice(0,7);
+    if(!mk)return;
+    const o=map.get(mk)||{_d:mk,key:monthName(mk),tick:monthName(mk).split(" ")[0].slice(0,3)+" '"+mk.slice(2,4),objM:null,actM:null,objW:null,actW:null};
+    if(w.objMoney!==""&&w.objMoney!=null)o.objM=num(w.objMoney);
+    if(hasMoneyActual(w))o.actM=weekActual(w);
+    if(w.objWeight!==""&&w.objWeight!=null)o.objW=num(w.objWeight);
+    if(w.actWeight!==""&&w.actWeight!=null)o.actW=num(w.actWeight);
+    map.set(mk,o);
+  });
+  return [...map.values()].sort((a,b)=>a._d.localeCompare(b._d));
+}
+function axisFmt(v,isKg){
+  if(isKg) return Number(v).toFixed(1);
+  const a=Math.abs(v);
+  if(a>=1000) return (v/1000).toFixed(a>=100000?0:1).replace(/\.0$/,"")+"k";
+  return Math.round(v);
+}
+function lineChart(rows,series,isKg){
+  const pts=series.map(s=>rows.map((r,i)=>({i,v:r[s.f],key:r.key})));
+  const all=pts.flat().filter(p=>p.v!=null).map(p=>p.v);
+  const drawn=rows.length;
+  if(all.length<2||drawn<2) return `<p class="muted small">Not enough data in this range yet — add weeks or merge your history in Setup → Your data.</p>`;
+  let lo=Math.min(...all),hi=Math.max(...all);
+  if(lo===hi){lo-=1;hi+=1;}
+  const pad=(hi-lo)*0.09; lo-=pad; hi+=pad;
+  const W=760,H=240,L=52,R=12,T=12,B=28;
+  const x=i=>drawn===1?L+(W-L-R)/2:L+(W-L-R)*i/(drawn-1);
+  const y=v=>T+(H-T-B)*(1-(v-lo)/(hi-lo));
+  // gridlines + y labels
+  let g="";
+  for(let k=0;k<=4;k++){
+    const v=lo+(hi-lo)*k/4, yy=y(v);
+    g+=`<line x1="${L}" x2="${W-R}" y1="${yy.toFixed(1)}" y2="${yy.toFixed(1)}" stroke="#2A313C" stroke-width="1"/>
+        <text x="${L-8}" y="${(yy+4).toFixed(1)}" text-anchor="end" font-size="10" fill="#8B95A2" font-family="var(--mono)">${axisFmt(v,isKg)}</text>`;
+  }
+  // x ticks (max ~8)
+  const step=Math.max(1,Math.ceil(drawn/8));
+  for(let i=0;i<drawn;i+=step){
+    g+=`<text x="${x(i).toFixed(1)}" y="${H-8}" text-anchor="middle" font-size="10" fill="#5E6773">${esc(rows[i].tick||"")}</text>`;
+  }
+  // series
+  let lines="";
+  series.forEach((s,si)=>{
+    const p=pts[si].filter(q=>q.v!=null);
+    if(!p.length)return;
+    const path=p.map((q,j)=>(j?"L":"M")+x(q.i).toFixed(1)+" "+y(q.v).toFixed(1)).join(" ");
+    lines+=`<path d="${path}" fill="none" stroke="${s.color}" stroke-width="2" ${s.dash?'stroke-dasharray="5 4"':''} stroke-linejoin="round" stroke-linecap="round"/>`;
+    p.forEach(q=>{
+      lines+=`<circle cx="${x(q.i).toFixed(1)}" cy="${y(q.v).toFixed(1)}" r="3" fill="${s.color}"><title>${esc(q.key)} — ${s.name}: ${isKg?kg(q.v):money(q.v)}</title></circle>`;
+    });
+  });
+  return `<div class="chart-wrap"><svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">${g}${lines}</svg></div>`;
+}
+function chartControls(){
+  const ranges=[["3m","3M"],["6m","6M"],["9m","9M"],["1y","1Y"],["all","All"]];
+  const grans=[["week","Weekly"],["month","Monthly"]];
+  return `<div class="toolbar" style="margin-bottom:14px">
+    ${ranges.map(([v,t])=>`<span class="chip ${S.ui.range===v?'on':''}" data-act="setRange" data-val="${v}">${t}</span>`).join("")}
+    <div class="spacer"></div>
+    ${grans.map(([v,t])=>`<span class="chip ${S.ui.gran===v?'on':''}" data-act="setGran" data-val="${v}">${t}</span>`).join("")}
+  </div>`;
+}
+function legend(items){
+  return `<div class="legend">${items.map(i=>`<span><span class="dot" style="background:${i.color}"></span>${i.name}${i.dash?' (dashed)':''}</span>`).join("")}</div>`;
+}
+
+/* ---------- history import (merge) ---------- */
+function normEntry(e){
+  const g=(...ks)=>{for(const k of ks){if(e[k]!==undefined&&e[k]!==null&&e[k]!=="")return e[k];}return "";};
+  const numOr=v=>(v===""||v==null)?"":num(v);
+  let label=String(g("label","week","cw")||"").trim();
+  if(/^\d+$/.test(label)) label="CW "+label.padStart(2,"0");
+  let date=String(g("date")||"").slice(0,10);
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(date)) date="";
+  let month=String(g("month")||"").slice(0,7);
+  if(!/^\d{4}-\d{2}$/.test(month)) month=date?date.slice(0,7):"";
+  return {label,month,date,
+    objMoney:numOr(g("objMoney","obj_money","objective","objectiveMoney","targetMoney")),
+    actMoney:numOr(g("actMoney","act_money","actual","actualMoney","balance")),
+    objWeight:numOr(g("objWeight","obj_weight","objectiveWeight","targetWeight")),
+    actWeight:numOr(g("actWeight","act_weight","actualWeight","weight"))};
+}
+function mergeHistory(list){
+  let added=0,updated=0;
+  const perMonthCount={};
+  // seed counters with existing dated weeks so synthesized dates don't collide badly
+  list.forEach(raw=>{
+    const e=normEntry(raw);
+    if(!e.label&&!e.month&&!e.date) return;
+    const realDate=!!e.date;
+    if(!e.date&&e.month){
+      perMonthCount[e.month]=(perMonthCount[e.month]||0);
+      const day=1+perMonthCount[e.month]*7;
+      e.date=e.month+"-"+String(Math.min(28,day)).padStart(2,"0");
+      perMonthCount[e.month]++;
+    }
+    let w=S.weeks.find(x=>e.month&&e.label&&x.month===e.month&&(x.label||"").trim().toLowerCase()===e.label.toLowerCase())
+        ||(realDate?S.weeks.find(x=>x.date===e.date):null);
+    if(w){
+      if(e.objMoney!=="")w.objMoney=e.objMoney;
+      if(e.actMoney!==""){w.actStart=e.actMoney;}
+      if(e.objWeight!=="")w.objWeight=e.objWeight;
+      if(e.actWeight!=="")w.actWeight=e.actWeight;
+      if(!w.date&&e.date)w.date=e.date;
+      if(!w.month&&e.month)w.month=e.month;
+      updated++;
+    }else{
+      S.weeks.push({id:uid(),label:e.label||"CW ??",month:e.month,date:e.date,
+        objMoney:e.objMoney===""?0:e.objMoney,actStart:e.actMoney===""?"":e.actMoney,
+        budget:num(S.config.weeklyBudget),objWeight:e.objWeight,actWeight:e.actWeight,items:[],spend:[]});
+      added++;
+    }
+  });
+  return {added,updated};
+}
+function handlePaste(){
+  const ta=document.getElementById("histPaste");
+  if(!ta||!ta.value.trim()){alert("Paste your history JSON first.");return;}
+  let d;
+  try{ d=JSON.parse(ta.value); }
+  catch(err){ alert("That's not valid JSON. Make sure you copied the whole block, including [ and ]."); return; }
+  if(Array.isArray(d)){
+    const r=mergeHistory(d);
+    render(); alert(`Merged ✓  ${r.added} week(s) added, ${r.updated} updated.`);
+  }else if(d&&Array.isArray(d.weeks)&&!d.config){
+    const r=mergeHistory(d.weeks);
+    render(); alert(`Merged ✓  ${r.added} week(s) added, ${r.updated} updated.`);
+  }else if(d&&d.config&&d.weeks){
+    if(confirm("This looks like a full backup. Replace ALL current data with it?")){ S=d; S.ui=Object.assign({tab:"setup",range:"6m",gran:"week"},S.ui||{}); render(); alert("Restored ✓"); }
+  }else{
+    alert("Unrecognized format. Expected an array like [{\"month\":\"2025-01\",\"week\":\"CW 01\",...}]");
+  }
+}
+
+/* ---------- render ---------- */
+const NAV=[
+  ["dashboard","Dashboard"],["weeks","Weekly tracking"],["budget","Daily budget"],["setup","Setup"]
+];
+function renderNav(){
+  document.getElementById("nav").innerHTML=NAV.map(([k,t])=>
+    `<button data-tab="${k}" class="${S.ui.tab===k?'on':''}"><span class="ic"></span>${t}</button>`).join("");
+}
+function render(){
+  renderNav();
+  const m=document.getElementById("main");
+  if(S.ui.tab==="dashboard")m.innerHTML=viewDashboard();
+  else if(S.ui.tab==="weeks")m.innerHTML=viewWeeks();
+  else if(S.ui.tab==="budget")m.innerHTML=viewBudget();
+  else if(S.ui.tab==="setup")m.innerHTML=viewSetup();
+  save();
+}
+
+/* ---------- DASHBOARD ---------- */
+function ring(pct){
+  const r=58,c=2*Math.PI*r,off=c*(1-pct);
+  return `<svg class="ring" width="148" height="148" viewBox="0 0 148 148">
+    <circle cx="74" cy="74" r="${r}" fill="none" stroke="#222834" stroke-width="11"/>
+    <circle cx="74" cy="74" r="${r}" fill="none" stroke="url(#g)" stroke-width="11" stroke-linecap="round"
+      stroke-dasharray="${c}" stroke-dashoffset="${off}" transform="rotate(-90 74 74)"/>
+    <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#C9A24B"/><stop offset="1" stop-color="#E0C281"/></linearGradient></defs>
+    <text x="74" y="70" text-anchor="middle" font-family="var(--mono)" font-size="26" font-weight="600" fill="#E7E9ED">${(pct*100).toFixed(1)}%</text>
+    <text x="74" y="90" text-anchor="middle" font-size="10" fill="#8B95A2" letter-spacing="1">OF GOAL</text>
+  </svg>`;
+}
+function viewDashboard(){
+  const cs=currentSavings(), goal=S.config.goal, net=monthlyNet();
+  const remaining=goal-cs;
+  const w=lastWeek();
+  const aw=w&&w.actWeight!==""?num(w.actWeight):null;
+
+  // ETA
+  let etaHtml="";
+  if(net>0 && remaining>0){
+    const months=Math.ceil(remaining/net);
+    const d=addMonths(new Date(),months);
+    const dateStr=d.toLocaleDateString("en-US",{month:"long",year:"numeric"});
+    etaHtml=`<div class="eta">On track → <b>${dateStr}</b><div class="muted small" style="margin-top:4px;font-family:var(--mono)">${months} month${months>1?'s':''} away · +${money(net)}/month</div></div>`;
+  }else if(net<=0){
+    etaHtml=`<div class="eta muted" style="font-size:15px">Your monthly plan saves ${money(net)} — adjust income, expenses or budget in Setup to reach the goal.</div>`;
+  }else{
+    etaHtml=`<div class="eta"><b>Goal reached.</b></div>`;
+  }
+
+  // projection rows
+  const rows=[];
+  for(const m of [1,2,3,6,12]){
+    const val=cs+net*m;
+    const d=addMonths(new Date(),m);
+    rows.push(`<div class="proj-row"><span class="when">${d.toLocaleDateString("en-US",{month:"short",year:"numeric"})}<span class="muted"> · +${m}mo</span></span>
+      <span><span class="amt">${money(val)}</span><span class="pct">${Math.min(100,val/goal*100).toFixed(1)}%</span></span></div>`);
+  }
+
+  // weight projection
+  let wBlock=`<p class="muted small">Log an actual weight in Weekly tracking to see your weight trajectory.</p>`;
+  if(aw!==null){
+    const wgoal=num(S.config.weight.goal), rate=num(S.config.weight.weeklyRate);
+    const toLose=aw-wgoal;
+    let wp="";
+    if(rate>0 && toLose>0){
+      const wks=Math.ceil(toLose/rate);
+      const d=new Date(); d.setDate(d.getDate()+wks*7);
+      wp=`<div class="stat"><span class="k">Reach ${kg(wgoal)} by</span><span class="v sm teal">${d.toLocaleDateString("en-US",{month:"short",year:"numeric"})}</span></div>`;
+    }else if(toLose<=0){ wp=`<div class="stat"><span class="k">Status</span><span class="v sm teal">Goal reached</span></div>`; }
+    const next=Math.max(wgoal,aw-rate);
+    wBlock=`<div class="grid cols-3">
+      <div class="stat"><span class="k">Current</span><span class="v teal">${kg(aw)}</span></div>
+      <div class="stat"><span class="k">Next week target</span><span class="v sm">${kg(next)}</span></div>
+      ${wp||`<div class="stat"><span class="k">Goal</span><span class="v sm">${kg(wgoal)}</span></div>`}
+    </div>`;
+  }
+
+  // this month gain
+  const monthKey=w?w.month:null;
+  let gainHtml="";
+  if(monthKey){
+    const mw=sortedWeeks().filter(x=>x.month===monthKey);
+    if(mw.length){
+      const start=num(mw[0].actStart);
+      const end=weekActual(mw[mw.length-1]);
+      const g=end-start;
+      gainHtml=`<div class="stat"><span class="k">${monthName(monthKey)} so far</span><span class="v sm ${g>=0?'pos':'neg'}">${g>=0?'+':''}${money(g)}</span></div>`;
+    }
+  }
+
+  return `
+  <div class="eyebrow">Horizon</div>
+  <h1 class="page">Where you stand</h1>
+  <div class="page-sub">Goal: ${money(goal)} saved.</div>
+
+  <div class="card glow" style="margin-bottom:18px">
+    <div class="horizon">
+      ${ring(progress())}
+      <div class="horizon-body">
+        <div class="big"><span class="cur">${money(cs)}</span></div>
+        <div class="big-sub">${money(remaining)} to go · ${money(goal)} target</div>
+        ${etaHtml}
+        <div class="runway"><div style="width:${(progress()*100).toFixed(1)}%"></div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="grid cols-2" style="margin-bottom:18px">
+    <div class="card">
+      <h3>If you stick to the plan</h3>
+      ${rows.join("")}
+    </div>
+    <div class="card">
+      <h3>This month</h3>
+      <div class="grid" style="gap:18px">
+        <div class="stat"><span class="k">Planned monthly saving</span><span class="v ${net>=0?'gold':'neg'}">${net>=0?'+':''}${money(net)}</span></div>
+        ${gainHtml}
+        <div class="stat"><span class="k">Weekly discretionary budget</span><span class="v sm">${money(S.config.weeklyBudget)}<span class="muted small"> · ${money(S.config.weeklyBudget/7)}/day</span></span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-bottom:18px">
+    <h3>Weight trajectory</h3>
+    ${wBlock}
+  </div>
+
+  <div class="card glow" style="margin-bottom:18px">
+    <h3>Progress over time</h3>
+    ${chartControls()}
+    ${legend([{name:"Actual savings",color:"#54B6B0"},{name:"Objective",color:"#C9A24B",dash:true}])}
+    ${lineChart(historyRows(),[{f:"objM",name:"Objective",color:"#C9A24B",dash:true},{f:"actM",name:"Actual",color:"#54B6B0"}],false)}
+  </div>
+
+  <div class="card">
+    <h3>Weight over time</h3>
+    ${legend([{name:"Actual weight",color:"#54B6B0"},{name:"Objective",color:"#C9A24B",dash:true}])}
+    ${lineChart(historyRows(),[{f:"objW",name:"Objective",color:"#C9A24B",dash:true},{f:"actW",name:"Actual",color:"#54B6B0"}],true)}
+    <p class="muted small" style="margin-top:10px">Range &amp; weekly/monthly view follow the selector above. Edit any week in Weekly tracking and these charts update instantly.</p>
+  </div>`;
+}
+
+/* ---------- WEEKS ---------- */
+function viewWeeks(){
+  const weeks=sortedWeeks().reverse();
+  let body;
+  if(!weeks.length){
+    body=`<div class="empty-state"><b>No weeks yet</b>Add your first week to start tracking objective vs actual.</div>`;
+  }else{
+    body=weeks.map(w=>weekCard(w)).join("");
+  }
+  return `
+  <div class="eyebrow">Per week</div>
+  <h1 class="page">Weekly tracking</h1>
+  <div class="page-sub">Objective vs actual — money and weight — with variance computed for you.</div>
+  <div class="toolbar">
+    <button class="btn gold" data-act="addWeek">+ Add week</button>
+    <span class="muted small">New weeks carry your last balance &amp; weight forward.</span>
+  </div>
+  ${body}`;
+}
+function weekCard(w){
+  const act=weekActual(w);
+  const v=weekVar(w);
+  const wv=(w.actWeight!==""&&w.objWeight!=="")?(num(w.actWeight)-num(w.objWeight)):null;
+  const plan=S.config.plan||{incomes:[],fixed:[]};
+  const chips=[...(plan.incomes||[]).map(i=>({...i,kind:"in"})),...(plan.fixed||[]).map(i=>({...i,kind:"out"}))];
+  return `
+  <div class="card" style="margin-bottom:16px" data-wk="${w.id}">
+    <div style="display:flex;align-items:center;gap:14px;margin-bottom:18px">
+      <div>
+        <input class="wk-label" style="width:120px;background:transparent;border:none;padding:0" value="${esc(w.label)}" data-edit="label" data-wk="${w.id}">
+        <div class="wk-month">${w.month?monthName(w.month):''}</div>
+      </div>
+      <input type="date" style="width:160px" value="${w.date||''}" data-edit="date" data-wk="${w.id}">
+      <div class="spacer"></div>
+      ${v!==null?`<span class="badge ${v>=0?'pos':'neg'}">${v>=0?'+':''}${money(v)}</span>`:''}
+      <button class="x" data-act="delWeek" data-wk="${w.id}" title="Delete week">✕</button>
+    </div>
+
+    <div class="grid cols-2">
+      <div>
+        <h3>Money</h3>
+        <div class="row2">
+          <label class="fld"><span class="lbl">Objective (target balance)</span>
+            <input class="tnum" type="number" value="${w.objMoney}" data-edit="objMoney" data-wk="${w.id}"></label>
+          <label class="fld"><span class="lbl">Start balance (actual)</span>
+            <input class="tnum" type="number" value="${w.actStart}" data-edit="actStart" data-wk="${w.id}"></label>
+        </div>
+        <div class="small muted" style="margin:-4px 0 10px">Quick add this week:</div>
+        <div class="chips">
+          ${chips.map(c=>`<span class="chip" data-act="addItem" data-wk="${w.id}" data-name="${esc(c.name)}" data-amt="${c.amount}" data-kind="${c.kind}">
+            ${c.kind==='in'?'＋':'－'} ${esc(c.name)} <span class="muted">${money(c.amount)}</span></span>`).join("")}
+          <span class="chip" data-act="addItem" data-wk="${w.id}" data-name="" data-amt="0" data-kind="in">＋ blank</span>
+        </div>
+        ${(w.items||[]).map(it=>itemLine(w.id,it)).join("")}
+        <hr class="div">
+        <div style="display:flex;justify-content:space-between"><span class="muted">Actual balance</span><span class="tnum" style="font-size:17px;font-weight:600">${money(act)}</span></div>
+        ${v!==null?`<div style="display:flex;justify-content:space-between;margin-top:6px"><span class="muted">Variance vs objective</span><span class="variance ${v>=0?'pos':'neg'}">${v>=0?'+':''}${money(v)}</span></div>`:''}
+      </div>
+
+      <div>
+        <h3>Weight &amp; budget</h3>
+        <div class="row2">
+          <label class="fld"><span class="lbl">Objective weight</span>
+            <input class="tnum" type="number" step="0.1" value="${w.objWeight}" data-edit="objWeight" data-wk="${w.id}"></label>
+          <label class="fld"><span class="lbl">Actual weight</span>
+            <input class="tnum" type="number" step="0.1" value="${w.actWeight}" data-edit="actWeight" data-wk="${w.id}"></label>
+        </div>
+        ${wv!==null?`<div style="display:flex;justify-content:space-between;margin:-4px 0 14px"><span class="muted">Weight variance</span><span class="variance ${wv<=0?'pos':'neg'}">${wv>0?'+':''}${wv.toFixed(2)} kg</span></div>`:''}
+        <label class="fld"><span class="lbl">Discretionary budget this week</span>
+          <input class="tnum" type="number" value="${w.budget}" data-edit="budget" data-wk="${w.id}"></label>
+        <div style="display:flex;justify-content:space-between"><span class="muted">Spent so far</span><span class="tnum">${money(weekSpent(w))}</span></div>
+        <div style="display:flex;justify-content:space-between;margin-top:6px"><span class="muted">Remaining</span>
+          <span class="tnum ${(num(w.budget)-weekSpent(w))>=0?'pos':'neg'}" style="font-weight:600">${money(num(w.budget)-weekSpent(w))}</span></div>
+        <button class="btn ghost tiny" style="margin-top:12px" data-act="gotoBudget" data-wk="${w.id}">Open daily budget →</button>
+      </div>
+    </div>
+  </div>`;
+}
+function itemLine(wkId,it){
+  return `<div class="item-line" data-it="${it.id}" data-wk="${wkId}">
+    <input value="${esc(it.name)}" placeholder="Name" data-iedit="name" data-it="${it.id}" data-wk="${wkId}">
+    <input class="tnum" type="number" value="${it.amount}" data-iedit="amount" data-it="${it.id}" data-wk="${wkId}">
+    <div class="seg">
+      <button class="${it.kind==='in'?'on in':''}" data-iedit="kind" data-val="in" data-it="${it.id}" data-wk="${wkId}">in</button>
+      <button class="${it.kind==='out'?'on out':''}" data-iedit="kind" data-val="out" data-it="${it.id}" data-wk="${wkId}">out</button>
+    </div>
+    <button class="x" data-act="delItem" data-it="${it.id}" data-wk="${wkId}">✕</button>
+  </div>`;
+}
+
+/* ---------- BUDGET ---------- */
+function viewBudget(){
+  const weeks=sortedWeeks().reverse();
+  if(!weeks.length) return `<div class="eyebrow">Daily</div><h1 class="page">Daily budget</h1>
+    <div class="empty-state"><b>No week to budget yet</b>Add a week in Weekly tracking first.</div>`;
+  let wid=S.ui.budgetWeek;
+  if(!wid||!weeks.find(w=>w.id===wid)) wid=weeks[0].id;
+  const w=weeks.find(x=>x.id===wid);
+  const budget=num(w.budget), spent=weekSpent(w), remaining=budget-spent;
+  const dailyTarget=budget/7;
+
+  // group by day
+  const byDay={};
+  (w.spend||[]).forEach(e=>{ byDay[e.date]=(byDay[e.date]||0)+num(e.amount); });
+  const distinctDays=Object.keys(byDay).length;
+  const remainingDays=Math.max(1,7-distinctDays);
+  const perRemaining=remaining/remainingDays;
+
+  // 7 day cells from week date
+  const base=w.date?new Date(w.date):new Date();
+  let cells="";
+  for(let i=0;i<7;i++){
+    const d=new Date(base); d.setDate(d.getDate()+i);
+    const key=d.toISOString().slice(0,10);
+    const spentDay=byDay[key]||0;
+    const cls=spentDay===0?'empty':(spentDay>dailyTarget?'over':'under');
+    cells+=`<div class="day ${cls}"><div class="dn">${d.toLocaleDateString("en-US",{weekday:"short"})}</div>
+      <div class="dv">${spentDay?money(spentDay):'·'}</div></div>`;
+  }
+
+  const log=[...(w.spend||[])].sort((a,b)=>(b.date||"").localeCompare(a.date||"")).map(e=>
+    `<tr><td>${e.date||'—'}</td><td>${esc(e.note||'')}</td><td class="r tnum">${money(e.amount)}</td>
+     <td class="r"><button class="x" data-act="delSpend" data-sp="${e.id}" data-wk="${w.id}">✕</button></td></tr>`).join("");
+
+  const today=new Date().toISOString().slice(0,10);
+  return `
+  <div class="eyebrow">Daily</div>
+  <h1 class="page">Daily budget</h1>
+  <div class="page-sub">Your weekly allowance, split across 7 days. Every payment comes out of the pool and the rest re-spreads over the days left.</div>
+
+  <div class="toolbar">
+    <span class="muted small">Week:</span>
+    <select style="width:auto" data-act="pickWeek">
+      ${weeks.map(x=>`<option value="${x.id}" ${x.id===w.id?'selected':''}>${esc(x.label)} · ${x.month?monthName(x.month):''}</option>`).join("")}
+    </select>
+  </div>
+
+  <div class="grid cols-2" style="margin-bottom:18px">
+    <div class="card glow">
+      <h3>Remaining this week</h3>
+      <div class="pool"><span class="left ${remaining>=0?'gold':'neg'}">${money(remaining)}</span>
+        <span class="muted">of ${money(budget)}</span></div>
+      <div class="runway" style="margin-top:16px"><div style="width:${Math.max(0,Math.min(100,remaining/budget*100||0)).toFixed(0)}%;background:${remaining>=0?'linear-gradient(90deg,var(--gold),var(--gold-soft))':'var(--neg)'}"></div></div>
+      <div class="grid cols-2" style="margin-top:18px">
+        <div class="stat"><span class="k">Static daily target</span><span class="v sm">${money(dailyTarget)}</span></div>
+        <div class="stat"><span class="k">Now: per remaining day</span><span class="v sm ${perRemaining>=0?'pos':'neg'}">${money(perRemaining)}</span></div>
+      </div>
+    </div>
+    <div class="card">
+      <h3>Add a payment</h3>
+      <label class="fld"><span class="lbl">Amount (${cur()})</span><input class="tnum" type="number" id="spAmt" placeholder="0"></label>
+      <div class="row2">
+        <label class="fld"><span class="lbl">Date</span><input type="date" id="spDate" value="${today}"></label>
+        <label class="fld"><span class="lbl">Note (optional)</span><input id="spNote" placeholder="e.g. Coffee"></label>
+      </div>
+      <button class="btn gold" data-act="addSpend" data-wk="${w.id}">Log payment</button>
+    </div>
+  </div>
+
+  <div class="card" style="margin-bottom:18px">
+    <h3>The week at a glance</h3>
+    <div class="day-grid">${cells}</div>
+    <p class="muted small">Green outline = under the ${money(dailyTarget)} daily line, red = over. Pool resets when you start a new week.</p>
+  </div>
+
+  <div class="card">
+    <h3>Payments logged</h3>
+    ${log?`<table><thead><tr><th>Date</th><th>Note</th><th class="r">Amount</th><th></th></tr></thead><tbody>${log}</tbody></table>`
+      :`<p class="muted small">No payments logged for this week yet.</p>`}
+  </div>`;
+}
+
+/* ---------- SETUP ---------- */
+function viewSetup(){
+  const c=S.config, p=c.plan||{incomes:[],fixed:[]};
+  const incRows=(p.incomes||[]).map(i=>planLine("incomes",i)).join("");
+  const fixRows=(p.fixed||[]).map(i=>planLine("fixed",i)).join("");
+  return `
+  <div class="eyebrow">Configure</div>
+  <h1 class="page">Setup</h1>
+  <div class="page-sub">Set it once. Everything else calculates from here.</div>
+
+  <div class="grid cols-2" style="margin-bottom:18px">
+    <div class="card">
+      <h3>The big goal</h3>
+      <div class="row2">
+        <label class="fld"><span class="lbl">Savings goal</span><input class="tnum" type="number" value="${c.goal}" data-cfg="goal"></label>
+        <label class="fld"><span class="lbl">Currency</span><input value="${esc(c.currency)}" data-cfg="currency"></label>
+      </div>
+      <div class="row2">
+        <label class="fld"><span class="lbl">Weekly budget</span><input class="tnum" type="number" value="${c.weeklyBudget}" data-cfg="weeklyBudget"></label>
+        <label class="fld"><span class="lbl">Weeks per month</span><input class="tnum" type="number" value="${c.weeksPerMonth}" data-cfg="weeksPerMonth"></label>
+      </div>
+    </div>
+    <div class="card">
+      <h3>Weight</h3>
+      <div class="row2">
+        <label class="fld"><span class="lbl">Target weight (kg)</span><input class="tnum" type="number" step="0.1" value="${c.weight.goal}" data-cfg="weight.goal"></label>
+        <label class="fld"><span class="lbl">Lose per week (kg)</span><input class="tnum" type="number" step="0.1" value="${c.weight.weeklyRate}" data-cfg="weight.weeklyRate"></label>
+      </div>
+      <p class="muted small">Your current weight comes from the latest week you log in Weekly tracking.</p>
+    </div>
+  </div>
+
+  <div class="card glow" style="margin-bottom:18px">
+    <h3>Monthly plan — drives forecasts &amp; the first-week calc</h3>
+    <p class="muted small" style="margin:-8px 0 16px">This is your typical month: income in, fixed bills out. Used for "if you stick to the plan" projections and ETA to goal. Per-week one-offs go on each week itself.</p>
+    <div class="grid cols-2">
+      <div>
+        <div class="small muted" style="margin-bottom:8px">Income (＋)</div>
+        ${incRows}
+        <button class="btn ghost tiny" data-act="addPlan" data-grp="incomes">+ income</button>
+      </div>
+      <div>
+        <div class="small muted" style="margin-bottom:8px">Fixed expenses (－)</div>
+        ${fixRows}
+        <button class="btn ghost tiny" data-act="addPlan" data-grp="fixed">+ expense</button>
+      </div>
+    </div>
+    <hr class="div">
+    <div style="display:flex;justify-content:space-between;align-items:baseline">
+      <span class="muted">Planned net saving / month</span>
+      <span class="tnum ${monthlyNet()>=0?'gold':'neg'}" style="font-size:20px;font-weight:600">${monthlyNet()>=0?'+':''}${money(monthlyNet())}</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Your data</h3>
+    <p class="muted small" style="margin:-8px 0 14px">Everything is stored in this browser only. Use Backup to save a file (move it to your phone, or keep it safe); Restore loads it back.</p>
+    <div class="toolbar" style="margin:0 0 18px">
+      <button class="btn ghost" data-act="export">⬇ Backup to file</button>
+      <button class="btn ghost" data-act="import">⬆ Restore from file</button>
+      <div class="spacer"></div>
+      <button class="btn ghost danger" data-act="reset">Reset everything</button>
+    </div>
+    <hr class="div" style="margin:0 0 18px">
+    <h3>Merge history (paste JSON)</h3>
+    <p class="muted small" style="margin:-8px 0 12px">Paste extracted history here — an array like
+      <span class="tnum">[{"month":"2025-01","week":"CW 01","objMoney":50000,"actMoney":49200,"objWeight":92,"actWeight":92.4}, …]</span>.
+      Existing weeks (same date, or same month + week label) are updated; everything else is added. Paste chunk by chunk if needed — merging is safe to repeat.</p>
+    <textarea class="paste" id="histPaste" placeholder='[{"month":"2025-01","week":"CW 01","date":"2025-01-06","objMoney":50000,"actMoney":49200,"objWeight":92,"actWeight":92.4}]'></textarea>
+    <div class="toolbar" style="margin:12px 0 0">
+      <button class="btn gold" data-act="mergePaste">Merge into my data</button>
+      <span class="muted small">Tip: make a Backup first, just in case.</span>
+    </div>
+  </div>`;
+}
+function planLine(grp,i){
+  return `<div class="item-line budget-line" data-pid="${i.id}" data-grp="${grp}">
+    <input value="${esc(i.name)}" placeholder="Name" data-pedit="name" data-grp="${grp}" data-pid="${i.id}">
+    <input class="tnum" type="number" value="${i.amount}" data-pedit="amount" data-grp="${grp}" data-pid="${i.id}">
+    <button class="x" data-act="delPlan" data-grp="${grp}" data-pid="${i.id}">✕</button>
+  </div>`;
+}
+
+function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+
+/* ---------- mutations ---------- */
+function findWeek(id){return S.weeks.find(w=>w.id===id);}
+
+function addWeek(){
+  const prev=lastWeek();
+  const rate=num(S.config.weight.weeklyRate);
+  let label="CW 01", month=new Date().toISOString().slice(0,7), date=new Date().toISOString().slice(0,10);
+  let objMoney=0,actStart=0,objWeight="";
+  if(prev){
+    const mPrev=(prev.label.match(/(\d+)/)||[])[1];
+    if(mPrev) label="CW "+String(Number(mPrev)+1).padStart(2,"0");
+    const bal=weekActual(prev);
+    actStart=Math.round(bal*100)/100;
+    objMoney=Math.round((bal-num(S.config.weeklyBudget))*100)/100;
+    if(prev.actWeight!=="") objWeight=Math.max(num(S.config.weight.goal),num(prev.actWeight)-rate);
+    if(prev.date){const d=new Date(prev.date);d.setDate(d.getDate()+7);date=d.toISOString().slice(0,10);month=date.slice(0,7);}
+  }
+  S.weeks.push({id:uid(),label,month,date,objMoney,actStart,budget:num(S.config.weeklyBudget),objWeight,actWeight:"",items:[],spend:[]});
+  render();
+}
+
+/* ---------- events ---------- */
+document.addEventListener("click",e=>{
+  const t=e.target.closest("[data-tab],[data-act]");
+  if(!t)return;
+  if(t.dataset.tab){S.ui.tab=t.dataset.tab;render();return;}
+  const a=t.dataset.act;
+  if(a==="addWeek"){addWeek();}
+  else if(a==="delWeek"){if(confirm("Delete this week?")){S.weeks=S.weeks.filter(w=>w.id!==t.dataset.wk);render();}}
+  else if(a==="addItem"){const w=findWeek(t.dataset.wk);if(w){w.items.push({id:uid(),name:t.dataset.name,amount:num(t.dataset.amt),kind:t.dataset.kind});render();}}
+  else if(a==="delItem"){const w=findWeek(t.dataset.wk);if(w){w.items=w.items.filter(i=>i.id!==t.dataset.it);render();}}
+  else if(a==="gotoBudget"){S.ui.tab="budget";S.ui.budgetWeek=t.dataset.wk;render();}
+  else if(a==="pickWeek"){/*handled on change*/}
+  else if(a==="addSpend"){
+    const amt=num(document.getElementById("spAmt").value);
+    if(!amt){return;}
+    const w=findWeek(t.dataset.wk);
+    if(w){w.spend=w.spend||[];w.spend.push({id:uid(),amount:amt,date:document.getElementById("spDate").value||new Date().toISOString().slice(0,10),note:document.getElementById("spNote").value});render();}
+  }
+  else if(a==="delSpend"){const w=findWeek(t.dataset.wk);if(w){w.spend=w.spend.filter(s=>s.id!==t.dataset.sp);render();}}
+  else if(a==="addPlan"){const g=t.dataset.grp;S.config.plan[g].push({id:uid(),name:"",amount:0});render();}
+  else if(a==="delPlan"){const g=t.dataset.grp;S.config.plan[g]=S.config.plan[g].filter(i=>i.id!==t.dataset.pid);render();}
+  else if(a==="setRange"){S.ui.range=t.dataset.val;render();}
+  else if(a==="setGran"){S.ui.gran=t.dataset.val;render();}
+  else if(a==="mergePaste"){handlePaste();}
+  else if(a==="export"){doExport();}
+  else if(a==="import"){document.getElementById("importFile").click();}
+  else if(a==="reset"){if(confirm("Erase all data and start fresh? Back up first if unsure.")){S=JSON.parse(JSON.stringify(SEED));S.ui=Object.assign({tab:"dashboard",budgetWeek:null,range:"6m",gran:"week"},S.ui||{});render();}}
+  else if(a==="iedit_kind"){/*na*/}
+});
+
+// segmented kind buttons (in/out)
+document.addEventListener("click",e=>{
+  const b=e.target.closest('[data-iedit="kind"]');
+  if(!b)return;
+  const w=findWeek(b.dataset.wk);if(!w)return;
+  const it=w.items.find(i=>i.id===b.dataset.it);if(!it)return;
+  it.kind=b.dataset.val;render();
+});
+
+document.addEventListener("change",e=>{
+  const el=e.target;
+  if(el.dataset.act==="pickWeek"){S.ui.budgetWeek=el.value;render();return;}
+  if(el.id==="importFile"){handleImport(el);return;}
+  // week field edits
+  if(el.dataset.edit){
+    const w=findWeek(el.dataset.wk);if(!w)return;
+    const f=el.dataset.edit;
+    if(["objMoney","actStart","budget","objWeight","actWeight"].includes(f)){
+      w[f]=el.value===""?"":num(el.value);
+    }else{ w[f]=el.value; if(f==="date")w.month=(el.value||"").slice(0,7); }
+    render();return;
+  }
+  // item edits
+  if(el.dataset.iedit){
+    const w=findWeek(el.dataset.wk);if(!w)return;
+    const it=w.items.find(i=>i.id===el.dataset.it);if(!it)return;
+    const f=el.dataset.iedit;
+    it[f]= f==="amount"?num(el.value):el.value;
+    render();return;
+  }
+  // plan edits
+  if(el.dataset.pedit){
+    const g=el.dataset.grp;const i=S.config.plan[g].find(x=>x.id===el.dataset.pid);if(!i)return;
+    i[el.dataset.pedit]= el.dataset.pedit==="amount"?num(el.value):el.value;
+    render();return;
+  }
+  // config edits
+  if(el.dataset.cfg){
+    const path=el.dataset.cfg.split(".");
+    let o=S.config; for(let i=0;i<path.length-1;i++)o=o[path[i]];
+    const key=path[path.length-1];
+    o[key]= (el.type==="number")?num(el.value):el.value;
+    render();return;
+  }
+});
+
+/* ---------- export / import ---------- */
+function doExport(){
+  const blob=new Blob([JSON.stringify(S,null,2)],{type:"application/json"});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement("a");
+  a.href=url; a.download="ledger-backup-"+new Date().toISOString().slice(0,10)+".json";
+  a.click(); URL.revokeObjectURL(url);
+}
+function handleImport(input){
+  const f=input.files[0]; if(!f)return;
+  const r=new FileReader();
+  r.onload=()=>{ try{ const d=JSON.parse(r.result); if(d.config&&d.weeks){ S=d; S.ui=S.ui||{tab:"dashboard"}; render(); alert("Restored ✓"); } else alert("That file doesn't look like a Ledger backup."); }catch(err){ alert("Couldn't read that file."); } input.value=""; };
+  r.readAsText(f);
+}
+
+render();
+</script>
+</body>
+</html>
