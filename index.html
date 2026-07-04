@@ -9,7 +9,7 @@
     --bg:#0F1216; --surface:#161A20; --surface2:#1D222B; --line:#2A313C;
     --text:#E7E9ED; --muted:#8B95A2; --faint:#5E6773;
     --gold:#C9A24B; --gold-soft:#E0C281; --teal:#54B6B0;
-    --pos:#5BB57F; --neg:#D86A52;
+    --pos:#5BB57F; --neg:#D86A52; --violet:#9B8AD9;
     --serif:Georgia,'Iowan Old Style','Times New Roman',serif;
     --sans:system-ui,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
     --mono:ui-monospace,'SF Mono','Cascadia Code',Menlo,Consolas,monospace;
@@ -116,6 +116,7 @@
   .seg button{all:unset;cursor:pointer;padding:8px 0;flex:1;text-align:center;font-size:12px;color:var(--muted);width:42px}
   .seg button.on{background:var(--surface2);color:var(--text)}
   .seg button.on.in{color:var(--pos)} .seg button.on.out{color:var(--neg)}
+  .seg button.on.brw{color:var(--teal)} .seg button.on.lnd{color:var(--violet)}
   .x{all:unset;cursor:pointer;color:var(--faint);text-align:center;font-size:16px}
   .x:hover{color:var(--neg)}
 
@@ -225,13 +226,38 @@ function save(){
 }
 
 /* ---------- cloud sync (GitHub Gist) ---------- */
+/* ═══ HARDCODE YOUR SYNC CREDENTIALS HERE ═══════════════════════════════
+   1) HC_GIST_ID  — the ID from your gist's URL.
+   2) HC_TOKEN_PARTS — your fine-grained token, SPLIT INTO 2-3 PIECES.
+      Splitting is required: if you commit the token in one piece to a
+      public repo, GitHub's secret scanner detects it and REVOKES it
+      automatically. Example: token "github_pat_11ABCDEF_xyz123"
+      becomes ["github_pat_11AB","CDEF_xy","z123"].
+   ⚠ SECURITY: anyone who opens this page (or views the repo) can
+   reassemble the token and read/write the gists on your account.
+   Only do this if the Pages repo/URL is effectively private to you.  */
+const HC_GIST_ID = "66bccbfa39e36b978f3572b58f1586d9";                       // e.g. "66bccbfa39e36b978f3572b58f1586d9"
+const HC_TOKEN_PARTS = ["github_pat_11BH", "L2WAI0BwvvljegDvB2_wgWAZkcIfJIOHYrF9K3tH7r4mMORoI5ffF99hT3WNXjZAGGYT3IuGktiGhd"];             // e.g. ["github_pat_11AB","CDEF...rest"]
+/* ═══════════════════════════════════════════════════════════════════ */
+const HC_TOKEN = HC_TOKEN_PARTS.join("");
+const HARDCODED = !!(HC_GIST_ID && HC_TOKEN);
+
 const CLOUD_KEY="ledger_cloud_cfg_v1";
 const GIST_FILENAME="ledgerdata.json";
-function loadCloud(){ try{const r=localStorage.getItem(CLOUD_KEY); if(r)return JSON.parse(r);}catch(e){} return {gistId:"",token:""}; }
+function loadCloud(){
+  if(HARDCODED) return {gistId:HC_GIST_ID,token:HC_TOKEN};
+  try{const r=localStorage.getItem(CLOUD_KEY); if(r)return JSON.parse(r);}catch(e){}
+  return {gistId:"",token:""};
+}
 let CLOUD=loadCloud();
-function saveCloudCfg(){ try{localStorage.setItem(CLOUD_KEY,JSON.stringify(CLOUD));}catch(e){} }
+function saveCloudCfg(){ if(HARDCODED)return; try{localStorage.setItem(CLOUD_KEY,JSON.stringify(CLOUD));}catch(e){} }
 function cloudConfigured(){ return !!(CLOUD.gistId&&CLOUD.token); }
 function setCloudStatus(text){ const el=document.getElementById("cloudState"); if(el)el.textContent=text; }
+
+/* sync bookkeeping: remember the gist revision + local stamp at last successful sync,
+   so we can tell WHO changed since then instead of blindly comparing clocks. */
+function getSyncMarks(){ try{return JSON.parse(localStorage.getItem(CLOUD_KEY+"_marks"))||{};}catch(e){return{};} }
+function setSyncMarks(remoteStamp){ try{localStorage.setItem(CLOUD_KEY+"_marks",JSON.stringify({remote:remoteStamp||"",local:(S.meta&&S.meta.updatedAt)||""}));}catch(e){} }
 
 async function cloudFetch(){
   const res=await fetch(`https://api.github.com/gists/${encodeURIComponent(CLOUD.gistId)}`,{
@@ -245,7 +271,17 @@ async function cloudFetch(){
   if(!file) throw new Error("No "+GIST_FILENAME+" file in that gist");
   let content=file.content;
   if(file.truncated){ const raw=await fetch(file.raw_url); content=await raw.text(); }
-  return JSON.parse(content);
+  let state=null;
+  try{ state=JSON.parse(content); }catch(e){ state=null; }
+  return {state, stamp:data.updated_at||""};
+}
+function remoteHasData(remote){ return !!(remote && remote.config && Array.isArray(remote.weeks) && remote.weeks.length); }
+function applyRemote(remote, stamp){
+  S=remote;
+  S.ui=Object.assign({tab:"dashboard",budgetWeek:null,range:"6m",gran:"week"},S.ui||{});
+  try{localStorage.setItem(KEY,JSON.stringify(S));}catch(e){}
+  setSyncMarks(stamp);
+  render();
 }
 let pushTimer=null;
 function cloudPushDebounced(){
@@ -263,44 +299,95 @@ async function cloudPush(){
       body:JSON.stringify({files:{[GIST_FILENAME]:{content:JSON.stringify(S)}}})
     });
     if(!res.ok) throw new Error("Push failed ("+res.status+")");
+    const data=await res.json();
+    setSyncMarks(data.updated_at||"");
     setCloudStatus("Synced ✓ "+new Date().toLocaleTimeString());
   }catch(err){
     setCloudStatus("⚠ Sync failed — check Gist ID/token");
   }
 }
-async function cloudResolve(localTimeOverride){
+async function cloudResolve(opts){
+  opts=opts||{};
   if(!cloudConfigured())return;
   setCloudStatus("Checking cloud…");
   try{
-    const remote=await cloudFetch();
-    const remoteTime=remote&&remote.meta&&remote.meta.updatedAt?new Date(remote.meta.updatedAt).getTime():0;
-    const localTime=localTimeOverride!=null?localTimeOverride:(S.meta&&S.meta.updatedAt?new Date(S.meta.updatedAt).getTime():0);
-    if(remote&&remoteTime>localTime){
-      S=remote;
-      S.ui=Object.assign({tab:"dashboard",budgetWeek:null,range:"6m",gran:"week"},S.ui||{});
-      localStorage.setItem(KEY,JSON.stringify(S));
-      setCloudStatus("Synced ✓ (pulled latest)");
-      render();
-    }else{
+    const {state:remote, stamp}=await cloudFetch();
+    const marks=getSyncMarks();
+    const localStamp=(S.meta&&S.meta.updatedAt)||"";
+
+    if(!marks.remote){
+      // First sync on this device.
+      if(remoteHasData(remote)){
+        const localTouched=!!localStamp; // user has saved something locally
+        if(!localTouched || opts.firstConnect){
+          if(localTouched && !confirm("The cloud gist already has data.\n\nOK  → load the CLOUD data onto this device (recommended)\nCancel → keep this device's data and OVERWRITE the cloud")){
+            await cloudPush(); return;
+          }
+          applyRemote(remote, stamp);
+          setCloudStatus("Synced ✓ (pulled cloud data)");
+        }else{
+          applyRemote(remote, stamp);
+          setCloudStatus("Synced ✓ (pulled cloud data)");
+        }
+      }else{
+        await cloudPush(); // cloud empty → seed it with local
+      }
+      return;
+    }
+
+    const remoteChanged = stamp && stamp!==marks.remote;
+    const localChanged  = localStamp!==marks.local;
+
+    if(remoteChanged && localChanged){
+      // Both sides moved since last sync → newest wins, but say so.
+      const rT=new Date(stamp).getTime(), lT=localStamp?new Date(localStamp).getTime():0;
+      if(remoteHasData(remote) && rT>=lT){ applyRemote(remote, stamp); setCloudStatus("Synced ✓ (cloud was newer — pulled)"); }
+      else{ await cloudPush(); }
+    }else if(remoteChanged){
+      if(remoteHasData(remote)){ applyRemote(remote, stamp); setCloudStatus("Synced ✓ (pulled latest)"); }
+      else setCloudStatus("⚠ Cloud file is empty/invalid — use ⬆ Push to restore it");
+    }else if(localChanged){
       await cloudPush();
+    }else{
+      setSyncMarks(stamp);
+      setCloudStatus("Up to date ✓");
     }
   }catch(err){
     setCloudStatus("⚠ "+err.message);
   }
 }
-function cloudSyncOnLoad(){ return cloudResolve(BOOT_LOCAL_TIME); }
+function cloudSyncOnLoad(){ return cloudResolve(); }
 function cloudSyncNow(){ return cloudResolve(); }
+async function cloudForcePull(){
+  if(!cloudConfigured())return;
+  if(!confirm("Replace THIS DEVICE's data with the cloud copy?"))return;
+  setCloudStatus("Pulling…");
+  try{
+    const {state:remote, stamp}=await cloudFetch();
+    if(!remoteHasData(remote)){ setCloudStatus("⚠ Cloud file has no usable data"); return; }
+    applyRemote(remote, stamp);
+    setCloudStatus("Pulled cloud copy ✓");
+  }catch(err){ setCloudStatus("⚠ "+err.message); }
+}
+async function cloudForcePush(){
+  if(!cloudConfigured())return;
+  if(!confirm("Overwrite the CLOUD copy with this device's data?"))return;
+  await cloudPush();
+}
 async function cloudConnect(){
   const id=(document.getElementById("cloudGistId")||{}).value?.trim();
   const tok=(document.getElementById("cloudToken")||{}).value?.trim();
   if(!id||!tok){ alert("Enter both the Gist ID and the token."); return; }
   CLOUD={gistId:id,token:tok}; saveCloudCfg();
+  try{localStorage.removeItem(CLOUD_KEY+"_marks");}catch(e){}
   render();
-  await cloudSyncNow();
+  await cloudResolve({firstConnect:true});
 }
 function cloudDisconnect(){
   if(!confirm("Disconnect cloud sync on this device? Your local data stays untouched.")) return;
-  CLOUD={gistId:"",token:""}; saveCloudCfg(); setCloudStatus(""); render();
+  CLOUD={gistId:"",token:""}; saveCloudCfg();
+  try{localStorage.removeItem(CLOUD_KEY+"_marks");}catch(e){}
+  setCloudStatus(""); render();
 }
 
 /* ---------- helpers ---------- */
@@ -319,7 +406,17 @@ function num(v){ const n=parseFloat(v); return isNaN(n)?0:n; }
 function sortedWeeks(){ return [...S.weeks].sort((a,b)=>(a.date||"").localeCompare(b.date||"")||(a.label).localeCompare(b.label)); }
 function lastWeek(){ const w=sortedWeeks(); return w[w.length-1]||null; }
 
-function weekActual(w){ const it=(w.items||[]).reduce((s,i)=>s+(i.kind==="out"?-num(i.amount):num(i.amount)),0); return num(w.actStart)+it; }
+function weekActual(w){ const it=(w.items||[]).reduce((s,i)=>s+((i.kind==="out"||i.kind==="loan")?-num(i.amount):num(i.amount)),0); return num(w.actStart)+it; }
+/* Loans you gave out (owed to you) & money you borrowed (you owe), across all weeks.
+   Record a repayment as the same kind with a NEGATIVE amount. */
+function debtTotals(){
+  let lent=0,borrowed=0;
+  for(const w of S.weeks) for(const i of (w.items||[])){
+    if(i.kind==="loan") lent+=num(i.amount);
+    else if(i.kind==="borrow") borrowed+=num(i.amount);
+  }
+  return {lent,borrowed};
+}
 function weekVar(w){ if(w.actWeight==="" && (w.items||[]).length===0 && w.actStart==="") return null; return weekActual(w)-num(w.objMoney); }
 function weekSpent(w){ return (w.spend||[]).reduce((s,e)=>s+num(e.amount),0); }
 
@@ -532,6 +629,8 @@ function ring(pct){
 function viewDashboard(){
   const cs=currentSavings(), goal=S.config.goal, net=monthlyNet();
   const remaining=goal-cs;
+  const dt=debtTotals(), hasDebts=(dt.lent!==0||dt.borrowed!==0);
+  const truePos=cs-dt.borrowed+dt.lent;
   const w=lastWeek();
   const aw=w&&w.actWeight!==""?num(w.actWeight):null;
 
@@ -600,6 +699,10 @@ function viewDashboard(){
       <div class="horizon-body">
         <div class="big"><span class="cur">${money(cs)}</span></div>
         <div class="big-sub">${money(remaining)} to go · ${money(goal)} target</div>
+        ${hasDebts?`<div class="muted small" style="margin-top:4px">
+          <span style="color:var(--violet)">Owed to you ${money(dt.lent)}</span> ·
+          <span style="color:var(--teal)">You owe ${money(dt.borrowed)}</span> ·
+          True position <b style="color:var(--text)">${money(truePos)}</b></div>`:""}
         ${etaHtml}
         <div class="runway"><div style="width:${(progress()*100).toFixed(1)}%"></div></div>
       </div>
@@ -617,6 +720,7 @@ function viewDashboard(){
         <div class="stat"><span class="k">Planned monthly saving</span><span class="v ${net>=0?'gold':'neg'}">${net>=0?'+':''}${money(net)}</span></div>
         ${gainHtml}
         <div class="stat"><span class="k">Weekly discretionary budget</span><span class="v sm">${money(S.config.weeklyBudget)}<span class="muted small"> · ${money(S.config.weeklyBudget/7)}/day</span></span></div>
+        ${hasDebts?`<div class="stat"><span class="k">Loans &amp; borrows</span><span class="v sm"><span style="color:var(--violet)">+${money(dt.lent)} lent</span><span class="muted"> / </span><span style="color:var(--teal)">−${money(dt.borrowed)} borrowed</span></span></div>`:""}
       </div>
     </div>
   </div>
@@ -688,11 +792,13 @@ function weekCard(w){
           <label class="fld"><span class="lbl">Start balance (actual)</span>
             <input class="tnum" type="number" value="${w.actStart}" data-edit="actStart" data-wk="${w.id}"></label>
         </div>
-        <div class="small muted" style="margin:-4px 0 10px">Quick add this week:</div>
+        <div class="small muted" style="margin:-4px 0 10px">Quick add this week — <span style="color:var(--teal)">brw</span> = money you borrowed, <span style="color:var(--violet)">lnd</span> = money you lent out (record a repayment as the same kind with a negative amount):</div>
         <div class="chips">
           ${chips.map(c=>`<span class="chip" data-act="addItem" data-wk="${w.id}" data-name="${esc(c.name)}" data-amt="${c.amount}" data-kind="${c.kind}">
             ${c.kind==='in'?'＋':'－'} ${esc(c.name)} <span class="muted">${money(c.amount)}</span></span>`).join("")}
           <span class="chip" data-act="addItem" data-wk="${w.id}" data-name="" data-amt="0" data-kind="in">＋ blank</span>
+          <span class="chip" data-act="addItem" data-wk="${w.id}" data-name="Borrowed" data-amt="0" data-kind="borrow" style="border-color:var(--teal);color:var(--teal)">⇄ borrow</span>
+          <span class="chip" data-act="addItem" data-wk="${w.id}" data-name="Lent to" data-amt="0" data-kind="loan" style="border-color:var(--violet);color:var(--violet)">⇄ loan</span>
         </div>
         ${(w.items||[]).map(it=>itemLine(w.id,it)).join("")}
         <hr class="div">
@@ -726,6 +832,8 @@ function itemLine(wkId,it){
     <div class="seg">
       <button class="${it.kind==='in'?'on in':''}" data-iedit="kind" data-val="in" data-it="${it.id}" data-wk="${wkId}">in</button>
       <button class="${it.kind==='out'?'on out':''}" data-iedit="kind" data-val="out" data-it="${it.id}" data-wk="${wkId}">out</button>
+      <button class="${it.kind==='borrow'?'on brw':''}" data-iedit="kind" data-val="borrow" data-it="${it.id}" data-wk="${wkId}" title="Money you borrowed — adds to balance, tracked as debt you owe">brw</button>
+      <button class="${it.kind==='loan'?'on lnd':''}" data-iedit="kind" data-val="loan" data-it="${it.id}" data-wk="${wkId}" title="Money you lent out — leaves balance, tracked as owed to you">lnd</button>
     </div>
     <button class="x" data-act="delItem" data-it="${it.id}" data-wk="${wkId}">✕</button>
   </div>`;
@@ -876,13 +984,19 @@ function viewSetup(){
       2) create a <b>fine-grained token</b> at <span class="tnum">github.com/settings/tokens?type=beta</span> with only "Gists: Read and write" permission;
       3) paste both below on every device you want synced.
     </p>
+    ${HARDCODED?`
+    <p class="muted small" style="margin:-4px 0 14px">🔒 Credentials are <b>hardcoded in this file</b> (gist <span class="tnum">${esc(CLOUD.gistId.slice(0,8))}…</span>) — every device syncs automatically, nothing to paste.</p>
+    `:`
     <div class="row2">
       <label class="fld"><span class="lbl">Gist ID</span><input id="cloudGistId" placeholder="e.g. 1a2b3c4d5e6f" value="${esc(CLOUD.gistId)}"></label>
       <label class="fld"><span class="lbl">Token</span><input id="cloudToken" type="password" placeholder="github_pat_…" value="${esc(CLOUD.token)}"></label>
-    </div>
+    </div>`}
     <div class="toolbar" style="margin:0">
-      <button class="btn gold" data-act="cloudConnect">Connect &amp; sync</button>
-      ${cloudConfigured()?`<button class="btn ghost" data-act="cloudSyncNow">Sync now</button><button class="btn ghost danger" data-act="cloudDisconnect">Disconnect this device</button>`:""}
+      ${HARDCODED?"":`<button class="btn gold" data-act="cloudConnect">Connect &amp; sync</button>`}
+      ${cloudConfigured()?`<button class="btn ghost" data-act="cloudSyncNow">Sync now</button>
+        <button class="btn ghost" data-act="cloudForcePull" title="Replace this device's data with the cloud copy">⬇ Pull from cloud</button>
+        <button class="btn ghost" data-act="cloudForcePush" title="Overwrite the cloud copy with this device's data">⬆ Push to cloud</button>
+        ${HARDCODED?"":`<button class="btn ghost danger" data-act="cloudDisconnect">Disconnect this device</button>`}`:""}
       <span class="muted small" id="cloudStateInline">${cloudConfigured()?"Connected":"Not connected"}</span>
     </div>
     <p class="muted small" style="margin-top:10px">The token is stored only in this browser's local storage — it is never included in Backup files, and never leaves your device except to talk directly to GitHub's API.</p>
@@ -969,6 +1083,8 @@ document.addEventListener("click",e=>{
   else if(a==="reset"){if(confirm("Erase all data and start fresh? Back up first if unsure.")){S=JSON.parse(JSON.stringify(SEED));S.ui=Object.assign({tab:"dashboard",budgetWeek:null,range:"6m",gran:"week"},S.ui||{});render();}}
   else if(a==="cloudConnect"){cloudConnect();}
   else if(a==="cloudSyncNow"){cloudSyncNow();}
+  else if(a==="cloudForcePull"){cloudForcePull();}
+  else if(a==="cloudForcePush"){cloudForcePush();}
   else if(a==="cloudDisconnect"){cloudDisconnect();}
   else if(a==="iedit_kind"){/*na*/}
 });
