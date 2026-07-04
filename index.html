@@ -226,7 +226,7 @@ function save(){
 
 /* ---------- cloud sync (GitHub Gist) ---------- */
 const CLOUD_KEY="ledger_cloud_cfg_v1";
-const GIST_FILENAME="ledger-data.json";
+const GIST_FILENAME="ledgerdata.json";
 function loadCloud(){ try{const r=localStorage.getItem(CLOUD_KEY); if(r)return JSON.parse(r);}catch(e){} return {gistId:"",token:""}; }
 let CLOUD=loadCloud();
 function saveCloudCfg(){ try{localStorage.setItem(CLOUD_KEY,JSON.stringify(CLOUD));}catch(e){} }
