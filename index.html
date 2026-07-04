@@ -209,20 +209,31 @@ function load(){
   return JSON.parse(JSON.stringify(SEED));
 }
 let S=load();
-const BOOT_LOCAL_TIME=S.meta&&S.meta.updatedAt?new Date(S.meta.updatedAt).getTime():0;
+/* Snapshot of the DATA (config+weeks, not ui/meta). save() only bumps the
+   timestamp and pushes to the cloud when this actually changes — before,
+   every render() stamped meta and pushed, so a freshly opened page would
+   overwrite the gist within ~2s and always "win" conflict resolution. */
+let LAST_SNAPSHOT=JSON.stringify({config:S.config,weeks:S.weeks});
+function dataSnapshot(){ return JSON.stringify({config:S.config,weeks:S.weeks}); }
 S.ui=Object.assign({tab:"dashboard",budgetWeek:null,range:"6m",gran:"week"},S.ui||{});
 let saveTimer=null;
 function save(){
+  let changed=false;
   try{
-    S.meta=S.meta||{};
-    S.meta.updatedAt=new Date().toISOString();
+    const snap=dataSnapshot();
+    changed=snap!==LAST_SNAPSHOT;
+    if(changed){
+      S.meta=S.meta||{};
+      S.meta.updatedAt=new Date().toISOString();
+      LAST_SNAPSHOT=snap;
+    }
     localStorage.setItem(KEY,JSON.stringify(S));
     const el=document.getElementById("saveState");
-    if(el){el.textContent="Saved ✓";clearTimeout(saveTimer);saveTimer=setTimeout(()=>el.textContent="Saved locally",1200);}
+    if(el&&changed){el.textContent="Saved ✓";clearTimeout(saveTimer);saveTimer=setTimeout(()=>el.textContent="Saved locally",1200);}
   }catch(e){
     const el=document.getElementById("saveState");if(el)el.textContent="⚠ Storage blocked";
   }
-  cloudPushDebounced();
+  if(changed) cloudPushDebounced();
 }
 
 /* ---------- cloud sync (GitHub Gist) ---------- */
@@ -279,13 +290,16 @@ function remoteHasData(remote){ return !!(remote && remote.config && Array.isArr
 function applyRemote(remote, stamp){
   S=remote;
   S.ui=Object.assign({tab:"dashboard",budgetWeek:null,range:"6m",gran:"week"},S.ui||{});
+  LAST_SNAPSHOT=dataSnapshot(); // pulled data is the new baseline, not a local edit
   try{localStorage.setItem(KEY,JSON.stringify(S));}catch(e){}
   setSyncMarks(stamp);
   render();
 }
 let pushTimer=null;
+let SYNC_READY=false, PENDING_PUSH=false; // no pushes until the initial cloud check has run
 function cloudPushDebounced(){
   if(!cloudConfigured())return;
+  if(!SYNC_READY){ PENDING_PUSH=true; return; }
   clearTimeout(pushTimer);
   setCloudStatus("Syncing…");
   pushTimer=setTimeout(cloudPush,1500);
@@ -354,6 +368,9 @@ async function cloudResolve(opts){
     }
   }catch(err){
     setCloudStatus("⚠ "+err.message);
+  }finally{
+    SYNC_READY=true;
+    if(PENDING_PUSH){ PENDING_PUSH=false; cloudPushDebounced(); }
   }
 }
 function cloudSyncOnLoad(){ return cloudResolve(); }
