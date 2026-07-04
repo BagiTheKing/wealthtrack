@@ -21,7 +21,7 @@
   a{color:inherit}
   ::selection{background:var(--gold);color:#0F1216}
 
-  /* layout  */
+  /* layout */
   .app{display:flex;min-height:100vh}
   .side{width:232px;flex:0 0 232px;border-right:1px solid var(--line);padding:26px 18px;position:sticky;top:0;height:100vh;display:flex;flex-direction:column;gap:6px;background:linear-gradient(180deg,#13171D,#0F1216)}
   .brand{font-family:var(--serif);font-size:21px;letter-spacing:.5px;margin-bottom:2px}
@@ -161,6 +161,7 @@
     <nav class="nav" id="nav"></nav>
     <div class="side-foot">
       <div id="saveState">Saved locally</div>
+      <div id="cloudState" style="margin-top:2px"></div>
       <button data-act="export">Backup</button> ·
       <button data-act="import">Restore</button>
       <input type="file" id="importFile" accept="application/json" hidden>
@@ -207,16 +208,99 @@ function load(){
   return JSON.parse(JSON.stringify(SEED));
 }
 let S=load();
+const BOOT_LOCAL_TIME=S.meta&&S.meta.updatedAt?new Date(S.meta.updatedAt).getTime():0;
 S.ui=Object.assign({tab:"dashboard",budgetWeek:null,range:"6m",gran:"week"},S.ui||{});
 let saveTimer=null;
 function save(){
   try{
+    S.meta=S.meta||{};
+    S.meta.updatedAt=new Date().toISOString();
     localStorage.setItem(KEY,JSON.stringify(S));
     const el=document.getElementById("saveState");
     if(el){el.textContent="Saved ✓";clearTimeout(saveTimer);saveTimer=setTimeout(()=>el.textContent="Saved locally",1200);}
   }catch(e){
     const el=document.getElementById("saveState");if(el)el.textContent="⚠ Storage blocked";
   }
+  cloudPushDebounced();
+}
+
+/* ---------- cloud sync (GitHub Gist) ---------- */
+const CLOUD_KEY="ledger_cloud_cfg_v1";
+const GIST_FILENAME="ledger-data.json";
+function loadCloud(){ try{const r=localStorage.getItem(CLOUD_KEY); if(r)return JSON.parse(r);}catch(e){} return {gistId:"",token:""}; }
+let CLOUD=loadCloud();
+function saveCloudCfg(){ try{localStorage.setItem(CLOUD_KEY,JSON.stringify(CLOUD));}catch(e){} }
+function cloudConfigured(){ return !!(CLOUD.gistId&&CLOUD.token); }
+function setCloudStatus(text){ const el=document.getElementById("cloudState"); if(el)el.textContent=text; }
+
+async function cloudFetch(){
+  const res=await fetch(`https://api.github.com/gists/${encodeURIComponent(CLOUD.gistId)}`,{
+    headers:{Authorization:`token ${CLOUD.token}`,Accept:"application/vnd.github+json"}
+  });
+  if(res.status===401||res.status===403) throw new Error("Bad token or no access");
+  if(res.status===404) throw new Error("Gist not found");
+  if(!res.ok) throw new Error("Fetch failed ("+res.status+")");
+  const data=await res.json();
+  const file=data.files&&data.files[GIST_FILENAME];
+  if(!file) throw new Error("No "+GIST_FILENAME+" file in that gist");
+  let content=file.content;
+  if(file.truncated){ const raw=await fetch(file.raw_url); content=await raw.text(); }
+  return JSON.parse(content);
+}
+let pushTimer=null;
+function cloudPushDebounced(){
+  if(!cloudConfigured())return;
+  clearTimeout(pushTimer);
+  setCloudStatus("Syncing…");
+  pushTimer=setTimeout(cloudPush,1500);
+}
+async function cloudPush(){
+  if(!cloudConfigured())return;
+  try{
+    const res=await fetch(`https://api.github.com/gists/${encodeURIComponent(CLOUD.gistId)}`,{
+      method:"PATCH",
+      headers:{Authorization:`token ${CLOUD.token}`,Accept:"application/vnd.github+json","Content-Type":"application/json"},
+      body:JSON.stringify({files:{[GIST_FILENAME]:{content:JSON.stringify(S)}}})
+    });
+    if(!res.ok) throw new Error("Push failed ("+res.status+")");
+    setCloudStatus("Synced ✓ "+new Date().toLocaleTimeString());
+  }catch(err){
+    setCloudStatus("⚠ Sync failed — check Gist ID/token");
+  }
+}
+async function cloudResolve(localTimeOverride){
+  if(!cloudConfigured())return;
+  setCloudStatus("Checking cloud…");
+  try{
+    const remote=await cloudFetch();
+    const remoteTime=remote&&remote.meta&&remote.meta.updatedAt?new Date(remote.meta.updatedAt).getTime():0;
+    const localTime=localTimeOverride!=null?localTimeOverride:(S.meta&&S.meta.updatedAt?new Date(S.meta.updatedAt).getTime():0);
+    if(remote&&remoteTime>localTime){
+      S=remote;
+      S.ui=Object.assign({tab:"dashboard",budgetWeek:null,range:"6m",gran:"week"},S.ui||{});
+      localStorage.setItem(KEY,JSON.stringify(S));
+      setCloudStatus("Synced ✓ (pulled latest)");
+      render();
+    }else{
+      await cloudPush();
+    }
+  }catch(err){
+    setCloudStatus("⚠ "+err.message);
+  }
+}
+function cloudSyncOnLoad(){ return cloudResolve(BOOT_LOCAL_TIME); }
+function cloudSyncNow(){ return cloudResolve(); }
+async function cloudConnect(){
+  const id=(document.getElementById("cloudGistId")||{}).value?.trim();
+  const tok=(document.getElementById("cloudToken")||{}).value?.trim();
+  if(!id||!tok){ alert("Enter both the Gist ID and the token."); return; }
+  CLOUD={gistId:id,token:tok}; saveCloudCfg();
+  render();
+  await cloudSyncNow();
+}
+function cloudDisconnect(){
+  if(!confirm("Disconnect cloud sync on this device? Your local data stays untouched.")) return;
+  CLOUD={gistId:"",token:""}; saveCloudCfg(); setCloudStatus(""); render();
 }
 
 /* ---------- helpers ---------- */
@@ -783,6 +867,27 @@ function viewSetup(){
     </div>
   </div>
 
+  <div class="card glow" style="margin-bottom:18px">
+    <h3>Cloud sync (across devices)</h3>
+    <p class="muted small" style="margin:-8px 0 14px">
+      Connect a private GitHub Gist and this device will pull the latest data on open and push every change automatically —
+      no more manual export/import between phone and laptop. Set up once:
+      1) create a <b>secret gist</b> at <span class="tnum">gist.github.com</span> with a file named <span class="tnum">${GIST_FILENAME}</span> (content <span class="tnum">{}</span> is fine to start);
+      2) create a <b>fine-grained token</b> at <span class="tnum">github.com/settings/tokens?type=beta</span> with only "Gists: Read and write" permission;
+      3) paste both below on every device you want synced.
+    </p>
+    <div class="row2">
+      <label class="fld"><span class="lbl">Gist ID</span><input id="cloudGistId" placeholder="e.g. 1a2b3c4d5e6f" value="${esc(CLOUD.gistId)}"></label>
+      <label class="fld"><span class="lbl">Token</span><input id="cloudToken" type="password" placeholder="github_pat_…" value="${esc(CLOUD.token)}"></label>
+    </div>
+    <div class="toolbar" style="margin:0">
+      <button class="btn gold" data-act="cloudConnect">Connect &amp; sync</button>
+      ${cloudConfigured()?`<button class="btn ghost" data-act="cloudSyncNow">Sync now</button><button class="btn ghost danger" data-act="cloudDisconnect">Disconnect this device</button>`:""}
+      <span class="muted small" id="cloudStateInline">${cloudConfigured()?"Connected":"Not connected"}</span>
+    </div>
+    <p class="muted small" style="margin-top:10px">The token is stored only in this browser's local storage — it is never included in Backup files, and never leaves your device except to talk directly to GitHub's API.</p>
+  </div>
+
   <div class="card">
     <h3>Your data</h3>
     <p class="muted small" style="margin:-8px 0 14px">Everything is stored in this browser only. Use Backup to save a file (move it to your phone, or keep it safe); Restore loads it back.</p>
@@ -862,6 +967,9 @@ document.addEventListener("click",e=>{
   else if(a==="export"){doExport();}
   else if(a==="import"){document.getElementById("importFile").click();}
   else if(a==="reset"){if(confirm("Erase all data and start fresh? Back up first if unsure.")){S=JSON.parse(JSON.stringify(SEED));S.ui=Object.assign({tab:"dashboard",budgetWeek:null,range:"6m",gran:"week"},S.ui||{});render();}}
+  else if(a==="cloudConnect"){cloudConnect();}
+  else if(a==="cloudSyncNow"){cloudSyncNow();}
+  else if(a==="cloudDisconnect"){cloudDisconnect();}
   else if(a==="iedit_kind"){/*na*/}
 });
 
@@ -927,6 +1035,7 @@ function handleImport(input){
 }
 
 render();
+cloudSyncOnLoad();
 </script>
 </body>
 </html>
